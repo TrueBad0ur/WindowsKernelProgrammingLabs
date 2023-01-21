@@ -8,8 +8,8 @@ int Error(const char* message) {
 }
 
 int main(int argc, const char* argv[]) {
-	if (argc < 3) {
-		printf("Usage: Booster <threadid> <priority>\n");
+	if (argc < 4) {
+		printf("Usage: Booster <threadid> <basepriority> <priority>\n");
 		return 0;
 	}
 
@@ -19,7 +19,8 @@ int main(int argc, const char* argv[]) {
 
 	ThreadData data;
 	data.ThreadId = atoi(argv[1]);
-	data.Priority = atoi(argv[2]);
+	data.BasePriority = atoi(argv[2]);
+	data.Priority = atoi(argv[3]);
 
 	DWORD returned;
 	BOOL success = DeviceIoControl(hDevice, IOCTL_BOOSTER_SET_PRIORITY, &data, sizeof(data), nullptr, 0, &returned, nullptr);
