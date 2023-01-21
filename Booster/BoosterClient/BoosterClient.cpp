@@ -1,6 +1,6 @@
 #include <windows.h>
 #include <stdio.h>
-#include "..\Booster\BoosterCommon.h"
+#include "..\BoosterDriver\BoosterCommon.h"
 
 int Error(const char* message) {
 	printf("%s (error=%d)\n", message, GetLastError());

@@ -12,7 +12,7 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = BoosterDeviceControl;
 
 	UNICODE_STRING devName = RTL_CONSTANT_STRING(L"\\Device\\Booster");
-	
+
 	PDEVICE_OBJECT DeviceObject;
 	NTSTATUS status = IoCreateDevice(DriverObject, 0, &devName, FILE_DEVICE_UNKNOWN, 0, FALSE, &DeviceObject);
 
@@ -40,12 +40,12 @@ _Use_decl_annotations_ NTSTATUS BoosterDeviceControl(PDEVICE_OBJECT DeviceObject
 	auto status = STATUS_SUCCESS;
 
 	switch (stack->Parameters.DeviceIoControl.IoControlCode) {
-		case IOCTL_BOOSTER_SET_PRIORITY:
-			// Выполнить основную работу
-			break;
-		default:
-			status = STATUS_INVALID_DEVICE_REQUEST;
-			break;
+	case IOCTL_BOOSTER_SET_PRIORITY:
+		// Выполнить основную работу
+		break;
+	default:
+		status = STATUS_INVALID_DEVICE_REQUEST;
+		break;
 	}
 
 	Irp->IoStatus.Status = status;
