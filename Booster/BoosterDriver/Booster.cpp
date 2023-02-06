@@ -56,24 +56,27 @@ _Use_decl_annotations_ NTSTATUS BoosterDeviceControl(PDEVICE_OBJECT DeviceObject
 			status = STATUS_INVALID_PARAMETER;
 			break;
 		}
+		__try {
+			if (data->Priority < 1 || data->Priority > 31) {
+				status = STATUS_INVALID_PARAMETER;
+				break;
+			}
 
-		if (data->Priority < 1 || data->Priority > 31) {
-			status = STATUS_INVALID_PARAMETER;
-			break;
+			PETHREAD Thread;
+			status = PsLookupThreadByThreadId(ULongToHandle(data->ThreadId), &Thread);
+			if (!NT_SUCCESS(status))
+				break;
+
+			// don't fully understand how that works, so don't set edges
+			KeSetBasePriorityThread((PKTHREAD)Thread, data->BasePriority);
+			ObDereferenceObject(Thread);
+
+			KeSetPriorityThread((PKTHREAD)Thread, data->Priority);
+			ObDereferenceObject(Thread);
 		}
-
-		PETHREAD Thread;
-		status = PsLookupThreadByThreadId(ULongToHandle(data->ThreadId), &Thread);
-		if (!NT_SUCCESS(status))
-			break;
-
-		// don't fully understand how that works, so don't set edges
-		KeSetBasePriorityThread((PKTHREAD)Thread, data->BasePriority);
-		ObDereferenceObject(Thread);
-
-		KeSetPriorityThread((PKTHREAD)Thread, data->Priority);
-		ObDereferenceObject(Thread);
-
+		__except (EXCEPTION_EXECUTE_HANDLER) {
+			status = STATUS_ACCESS_VIOLATION;
+		}
 		break;
 	}
 	case IOCTL_BOOSTER_PRINT_OS_VERSION:
