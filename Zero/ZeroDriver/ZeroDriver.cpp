@@ -10,7 +10,7 @@ DRIVER_DISPATCH ZeroDriverCreateClose, ZeroDriverRead, ZeroDriverWrite, ZeroDevi
 
 // globals
 
-// long long g_TotalRead, g_TotalWritten;
+long long g_TotalRead, g_TotalWritten;
 
 // DriverEntry
 
@@ -86,6 +86,7 @@ NTSTATUS ZeroDriverRead(PDEVICE_OBJECT, PIRP Irp) {
 		return CompleteIrp(Irp, STATUS_INSUFFICIENT_RESOURCES);
 
 	memset(buffer, 0, len);
+	InterlockedAdd64(&g_TotalRead, len);
 
 	return CompleteIrp(Irp, STATUS_SUCCESS, len);
 }
@@ -94,11 +95,24 @@ NTSTATUS ZeroDriverWrite(PDEVICE_OBJECT, PIRP Irp) {
 	auto stack = IoGetCurrentIrpStackLocation(Irp);
 	auto len = stack->Parameters.Write.Length;
 
+	InterlockedAdd64(&g_TotalWritten, len);
+
 	return CompleteIrp(Irp, STATUS_SUCCESS, len);
 }
 
 NTSTATUS ZeroDeviceControl(PDEVICE_OBJECT, PIRP Irp) {
-	UNREFERENCED_PARAMETER(Irp);
-	return 1;
+	auto stack = IoGetCurrentIrpStackLocation(Irp);
+	auto& dic = stack->Parameters.DeviceIoControl;
 
+	if (dic.IoControlCode != IOCTL_ZERO_GET_STATS)
+		return CompleteIrp(Irp, STATUS_INVALID_DEVICE_REQUEST);
+
+	//if (dic.InputBufferLength < sizeof(ZeroStats))
+	//	return CompleteIrp(Irp, STATUS_BUFFER_TOO_SMALL);
+
+	auto stats = (ZeroStats*)Irp->AssociatedIrp.SystemBuffer;
+	stats->TotalRead = g_TotalRead;
+	stats->TotalWritten = g_TotalWritten;
+
+	return CompleteIrp(Irp, STATUS_SUCCESS, sizeof(ZeroStats));
 }

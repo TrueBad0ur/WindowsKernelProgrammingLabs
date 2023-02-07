@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "ZeroClientCommon.h"
 
 int Error(const char* msg) {
 	printf("%s: error=%d\n", msg, ::GetLastError());
@@ -40,6 +41,18 @@ int main() {
 
 	if (bytes != sizeof(buffer2))
 		printf("Wrong byte count\n");
+
+	ZeroStats stats = {0};
+	ZeroStats statsOut = {0};
+
+	ok = ::DeviceIoControl(hDevice, IOCTL_ZERO_GET_STATS, &stats, sizeof(stats), &statsOut, sizeof(statsOut), &bytes, nullptr);
+	if (!ok)
+		return Error("failed to write");
+
+	if (bytes != sizeof(statsOut))
+		printf("Wrong byte count\n");
+
+	printf("stats.TotalRead: %lld\nstats.TotalWritten: %lld\n", statsOut.TotalRead, statsOut.TotalWritten);
 
 	::CloseHandle(hDevice);
 }
