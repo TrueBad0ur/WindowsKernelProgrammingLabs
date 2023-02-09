@@ -1,0 +1,1 @@
+add /integritycheck to Project Properties -> Linker -> Command Line -> Additional Options
