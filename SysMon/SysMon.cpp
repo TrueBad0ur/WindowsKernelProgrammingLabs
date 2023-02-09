@@ -25,6 +25,7 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
 	PDEVICE_OBJECT DeviceObject = nullptr;
 	UNICODE_STRING symLink = RTL_CONSTANT_STRING(L"\\??\\SysMon");
 	bool symLinkCreated = false;
+	bool processCallbacks = false, threadCallbacks = false;
 
 	do {
 		UNICODE_STRING devName = RTL_CONSTANT_STRING(L"\\Device\\SysMon");
@@ -50,9 +51,28 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
 			KdPrint((DRIVER_PREFIX "failed to register process callback (0x%08X)\n", status));
 			break;
 		}
+		processCallbacks = true;
+
+		status = PsSetCreateThreadNotifyRoutine(OnThreadNotify);
+		if (!NT_SUCCESS(status)) {
+			KdPrint((DRIVER_PREFIX "failed to set thread callbacks (status=%08X)\n", status));
+			break;
+		}
+		threadCallbacks = true;
+
+		status = PsSetLoadImageNotifyRoutine(OnImageLoadNotify);
+		if (!NT_SUCCESS(status)) {
+			KdPrint((DRIVER_PREFIX "failed to set image load callback (status=%08X)\n", status));
+			break;
+		}
+
 	} while (false);
 
 	if (!NT_SUCCESS(status)) {
+		if (threadCallbacks)
+			PsRemoveCreateThreadNotifyRoutine(OnThreadNotify);
+		if (processCallbacks)
+			PsSetCreateProcessNotifyRoutineEx(OnProcessNotify, TRUE);
 		if (symLinkCreated)
 			IoDeleteSymbolicLink(&symLink);
 		if (DeviceObject)
@@ -135,6 +155,61 @@ void OnProcessNotify(PEPROCESS Process, HANDLE ProcessId, PPS_CREATE_NOTIFY_INFO
 
 		PushItem(&info->Entry);
 	}
+}
+
+void OnThreadNotify(HANDLE ProcessId, HANDLE ThreadId, BOOLEAN Create) {
+	auto size = sizeof(FullItem<ThreadCreateExitInfo>);
+	auto info = (FullItem<ThreadCreateExitInfo>*)ExAllocatePoolWithTag(PagedPool, size, DRIVER_TAG);
+
+	if (info == nullptr) {
+		KdPrint((DRIVER_PREFIX "Failed to allocate memory\n"));
+		return;
+	}
+
+	auto& item = info->Data;
+	KeQuerySystemTimePrecise(&item.Time);
+	item.Size = sizeof(item);
+	item.Type = Create ? ItemType::ThreadCreate : ItemType::ThreadExit;
+	item.ProcessId = HandleToULong(ProcessId);
+	item.ThreadId = HandleToULong(ThreadId);
+	PushItem(&info->Entry);
+}
+
+void OnImageLoadNotify(PUNICODE_STRING FullImageName, HANDLE ProcessId, PIMAGE_INFO ImageInfo) {
+	if (ProcessId == nullptr) {
+		// system image, ignore
+		return;
+	}
+
+	auto size = sizeof(FullItem<ImageLoadInfo>);
+	auto info = (FullItem<ImageLoadInfo>*)ExAllocatePoolWithTag(PagedPool, size, DRIVER_TAG);
+	if (info == nullptr) {
+		KdPrint((DRIVER_PREFIX "Failed to allocate memory\n"));
+		return;
+	}
+
+	::memset(info, 0, size);
+
+	auto& item = info->Data;
+	KeQuerySystemTimePrecise(&item.Time);
+	item.Size = sizeof(item);
+	item.Type = ItemType::ImageLoad;
+	item.ProcessId = HandleToULong(ProcessId);
+	item.ImageSize = ImageInfo->ImageSize;
+	item.LoadAddress = ImageInfo->ImageBase;
+
+	if (FullImageName) {
+		::memcpy(item.ImageFileName, FullImageName->Buffer, min(FullImageName->Length, MaxImageFileSize * sizeof(WCHAR)));
+	}
+	else {
+		::wcscpy_s(item.ImageFileName, L"(unknown)");
+	}
+
+	//if (ImageInfo->ExtendedInfoPresent) {
+	//	auto exinfo = CONTAINING_RECORD(ImageInfo, IMAGE_INFO_EX, ImageInfo);
+	//}
+
+	PushItem(&info->Entry);
 }
 
 void PushItem(LIST_ENTRY* entry) {

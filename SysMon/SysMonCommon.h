@@ -6,7 +6,7 @@ enum class ItemType : short {
 	ProcessExit,
 	ThreadCreate,
 	ThreadExit,
-	ImageLoad
+	ImageLoad,
 };
 
 struct ItemHeader {
