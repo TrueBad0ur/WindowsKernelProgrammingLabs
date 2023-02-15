@@ -15,13 +15,14 @@ bool FindProcess(ULONG pid);
 bool AddProcess(ULONG pid);
 bool RemoveProcess(ULONG pid);
 
-struct Globals {
-	int PidsCount;			// currently protected process count
-	ULONG Pids[MaxPids];	// protected PIDs
-	FastMutex Lock;
-	PVOID RegHandle;
+typedef struct _Globals {
+	int			PidsCount;		// Currently protected process count
+	ULONG		Pids[MaxPids];	// protected PIDs
+	FastMutex	Lock;
+	PVOID		RegHandle;		// object registration cookie
 
-	void Init() {
+	void Init()
+	{
 		Lock.Init();
 	}
-};
+} Globals, * PGlobals;

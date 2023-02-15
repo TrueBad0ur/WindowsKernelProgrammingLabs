@@ -45,11 +45,11 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 			break;
 		}
 
-		DeviceObject->Flags |= DO_BUFFERED_IO;
+		//DeviceObject->Flags |= DO_BUFFERED_IO;  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 		status = IoCreateSymbolicLink(&symName, &deviceName);
 		if (!NT_SUCCESS(status)) {
-			KdPrint((DRIVER_PREFIX "fai led to create symbolic link (status=%08X)\n", status));
+			KdPrint((DRIVER_PREFIX "failed to create symbolic link (status=%08X)\n", status));
 			break;
 		}
 	} while (false);
@@ -145,6 +145,7 @@ NTSTATUS ProcessProtectorDeviceControl(PDEVICE_OBJECT, PIRP Irp) {
 		
 		case IOCTL_PROCESS_QUERY_PIDS:
 		{
+			// currently doesn't work properly TODO!!!
 			auto size = stack->Parameters.DeviceIoControl.OutputBufferLength;
 
 			if (g_Data.PidsCount == 0)

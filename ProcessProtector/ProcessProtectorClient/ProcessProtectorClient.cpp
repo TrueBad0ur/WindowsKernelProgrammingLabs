@@ -47,20 +47,24 @@ int wmain(int argc, const wchar_t* argv[]) {
 	std::vector<DWORD> pids;
 	BOOL success = FALSE;
 	DWORD bytes;
-
 	switch (option) {
 	case Options::Add:
 		pids = ParsePids(argv + 2, argc - 2);
-		success = ::DeviceIoControl(hFile, IOCTL_PROCESS_PROTECT_BY_PID, pids.data(), static_cast<DWORD>(pids.size()) * sizeof(DWORD), nullptr, 0, &bytes, nullptr);
+		success = ::DeviceIoControl(hFile, IOCTL_PROCESS_PROTECT_BY_PID,
+			pids.data(), static_cast<DWORD>(pids.size()) * sizeof(DWORD),
+			nullptr, 0, &bytes, nullptr);
 		break;
 
 	case Options::Remove:
 		pids = ParsePids(argv + 2, argc - 2);
-		success = ::DeviceIoControl(hFile, IOCTL_PROCESS_UNPROTECT_BY_PID, pids.data(), static_cast<DWORD>(pids.size()) * sizeof(DWORD), nullptr, 0, &bytes, nullptr);
+		success = ::DeviceIoControl(hFile, IOCTL_PROCESS_UNPROTECT_BY_PID,
+			pids.data(), static_cast<DWORD>(pids.size()) * sizeof(DWORD),
+			nullptr, 0, &bytes, nullptr);
 		break;
 
 	case Options::Clear:
-		success = ::DeviceIoControl(hFile, IOCTL_PROCESS_PROTECT_CLEAR, nullptr, 0, nullptr, 0, &bytes, nullptr);
+		success = ::DeviceIoControl(hFile, IOCTL_PROCESS_PROTECT_CLEAR,
+			nullptr, 0, nullptr, 0, &bytes, nullptr);
 		break;
 
 	case Options::Query:
@@ -69,28 +73,26 @@ int wmain(int argc, const wchar_t* argv[]) {
 		ULONG size = 0;
 
 		success = ::DeviceIoControl(hFile, IOCTL_PROCESS_QUERY_PIDS, &size, sizeof(ULONG), &size, sizeof(ULONG), &bytes, nullptr);
+		printf("\n\n#1\nlpOutBuffer: %lu\nlpBytesReturned: %d\n", size, bytes);
 
-		printf("First Device IoControl error = %X & bytes = %X\n", GetLastError(), bytes);
+		printf("First DeviceIoControl error = %X & bytes = %X\n", GetLastError(), bytes);
 
-		if (size != 0)
-		{
+		if (size != 0) {
 			pid = (ULONG*)malloc(size);
 
-			success = ::DeviceIoControl(hFile, IOCTL_PROCESS_QUERY_PIDS, nullptr, 0, &pid, size, &bytes, nullptr);
+			success = ::DeviceIoControl(hFile, IOCTL_PROCESS_QUERY_PIDS, nullptr, 0, pid, size, &bytes, nullptr);
+			printf("\n\n#2\npid: %lu\nlpBytesReturned: %d\n", pid, bytes);
 
 			printf("Second DeviceIoControl error = %X & bytes = %X\n", GetLastError(), bytes);
 
-			if (GetLastError() == ERROR_SUCCESS)
-			{
-				for (size_t i = 0; i < (bytes / sizeof(ULONG)); i++)
+			if (GetLastError() == ERROR_SUCCESS) {
+				for (size_t i = 0; i < (bytes / sizeof(ULONG)); i++) {
 					printf("%d ", pid[i]);
+				}
 				printf("\n");
 			}
 		}
 	}
-	default:
-		break;
-
 	}
 
 	if (!success)
