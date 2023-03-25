@@ -13,6 +13,12 @@ void DisplayTime(const LARGE_INTEGER& time) {
 	printf("%02d:%02d:%02d.%03d: ", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
 }
 
+void DisplayBinary(const UCHAR* buffer, DWORD size) {
+	for (DWORD i = 0; i < size; i++)
+		printf("%02X ", buffer[i]);
+	printf("\n");
+}
+
 void DisplayInfo(BYTE* buffer, DWORD size) {
 	auto count = size;
 	while (count > 0) {
@@ -54,6 +60,30 @@ void DisplayInfo(BYTE* buffer, DWORD size) {
 			printf("Image loaded into process %d at address 0x%p (%ws)\n", info->ProcessId, info->LoadAddress, info->ImageFileName);
 			break;
 		}
+		case ItemType::RegistrySetValue:
+		{
+			DisplayTime(header->Time);
+			auto info = (RegistrySetValueInfo*)buffer;
+			printf("Registry write PID=%d: %ws\\%ws type: %d size: %d data: ",
+				info->ProcessId, info->KeyName, info->ValueName,
+				info->DataType, info->DataSize);
+			switch (info->DataType) {
+			case REG_DWORD:
+				printf("0x%08X\n", *(DWORD*)info->Data);
+				break;
+			case REG_SZ:
+			case REG_EXPAND_SZ:
+				printf("%ws\n", (WCHAR*)info->Data);
+				break;
+			case REG_BINARY:
+				DisplayBinary(info->Data, min(info->DataSize, sizeof(info->Data)));
+				break;
+			default:
+				DisplayBinary(info->Data, min(info->DataSize, sizeof(info->Data)));
+				break;
+			}
+			break;
+		}
 		default:
 			break;
 		}
@@ -68,7 +98,7 @@ int main() {
 	if (hFile == INVALID_HANDLE_VALUE)
 		return Error("Failed to open file");
 
-	BYTE buffer[1 << 16]; // 64-килобайтный буфер
+	BYTE buffer[1 << 16];
 
 	while (true) {
 		DWORD bytes;

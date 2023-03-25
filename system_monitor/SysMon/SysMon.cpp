@@ -16,16 +16,16 @@ NTSTATUS OnRegistryNotify(PVOID context, PVOID arg1, PVOID arg2);
 Globals g_Globals;
 
 extern "C" NTSTATUS
-DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
-	UNREFERENCED_PARAMETER(RegistryPath);
+DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING) {
 	auto status = STATUS_SUCCESS;
+
 	InitializeListHead(&g_Globals.ItemsHead);
 	g_Globals.Mutex.Init();
 
 	PDEVICE_OBJECT DeviceObject = nullptr;
 	UNICODE_STRING symLink = RTL_CONSTANT_STRING(L"\\??\\SysMon");
 	bool symLinkCreated = false;
-	bool processCallbacks = false, threadCallbacks = false;
+	bool processCallbacks = false, threadCallbacks = false, loadImageCallback = false;
 
 	do {
 		UNICODE_STRING devName = RTL_CONSTANT_STRING(L"\\Device\\SysMon");
@@ -37,8 +37,8 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
 		}
 
 		DeviceObject->Flags |= DO_DIRECT_IO;
-		status = IoCreateSymbolicLink(&symLink, &devName);
 
+		status = IoCreateSymbolicLink(&symLink, &devName);
 		if (!NT_SUCCESS(status)) {
 			KdPrint((DRIVER_PREFIX "failed to create sym link (0x%08X)\n", status));
 			break;
@@ -65,10 +65,20 @@ DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
 			KdPrint((DRIVER_PREFIX "failed to set image load callback (status=%08X)\n", status));
 			break;
 		}
+		loadImageCallback = true;
+
+		UNICODE_STRING altitude = RTL_CONSTANT_STRING(L"7657.124");
+		status = CmRegisterCallbackEx(OnRegistryNotify, &altitude, DriverObject, nullptr, &g_Globals.RegCookie, nullptr);
+		if (!NT_SUCCESS(status)) {
+			KdPrint((DRIVER_PREFIX "failed to set registry callback (status=%08X)\n", status));
+			break;
+		}
 
 	} while (false);
 
 	if (!NT_SUCCESS(status)) {
+		if (loadImageCallback)
+			PsRemoveLoadImageNotifyRoutine(OnImageLoadNotify);
 		if (threadCallbacks)
 			PsRemoveCreateThreadNotifyRoutine(OnThreadNotify);
 		if (processCallbacks)
@@ -216,7 +226,6 @@ void PushItem(LIST_ENTRY* entry) {
 	AutoLock<FastMutex> lock(g_Globals.Mutex);
 	// TODO: get value of maximum from registry: ZwOpenKey, IoOpenDeviceRegistryKey, ZwQueryValueKey
 	if (g_Globals.ItemCount > 1024) {
-		// Слишком много элементов, удалить самый старый
 		auto head = RemoveHeadList(&g_Globals.ItemsHead);
 		g_Globals.ItemCount--;
 		auto item = CONTAINING_RECORD(head, FullItem<ItemHeader>, Entry);
@@ -238,23 +247,22 @@ NTSTATUS SysMonRead(PDEVICE_OBJECT, PIRP Irp) {
 	auto len = stack->Parameters.Read.Length;
 	auto status = STATUS_SUCCESS;
 	auto count = 0;
-	NT_ASSERT(Irp->MdlAddress); // Используем прямой ввод/вывод
-	auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
+	NT_ASSERT(Irp->MdlAddress);
 
+	auto buffer = (UCHAR*)MmGetSystemAddressForMdlSafe(Irp->MdlAddress, NormalPagePriority);
 	if (!buffer) {
 		status = STATUS_INSUFFICIENT_RESOURCES;
 	}
 	else {
 		AutoLock<FastMutex> lock(g_Globals.Mutex);
 		while (true) {
-			if (IsListEmpty(&g_Globals.ItemsHead)) // также можно проверить
+			if (IsListEmpty(&g_Globals.ItemsHead))
 			// g_Globals.ItemCount
 				break;
 			auto entry = RemoveHeadList(&g_Globals.ItemsHead);
 			auto info = CONTAINING_RECORD(entry, FullItem<ItemHeader>, Entry);
 			auto size = info->Data.Size;
 			if (len < size) {
-				// Пользовательский буфер заполнен, вставить элемент обратно
 				InsertHeadList(&g_Globals.ItemsHead, entry);
 				break;
 			}
@@ -263,26 +271,78 @@ NTSTATUS SysMonRead(PDEVICE_OBJECT, PIRP Irp) {
 			len -= size;
 			buffer += size;
 			count += size;
-			// Освободить данные после копирования
 			ExFreePool(info);
 		}
 	}
-		Irp->IoStatus.Status = status;
 
+		Irp->IoStatus.Status = status;
 		Irp->IoStatus.Information = count;
 		IoCompleteRequest(Irp, 0);
 		return status;
 }
 
 void SysMonUnload(PDRIVER_OBJECT DriverObject) {
-	// Отмена регистрации уведомлений процессов
+	CmUnRegisterCallback(g_Globals.RegCookie);
+	PsRemoveLoadImageNotifyRoutine(OnImageLoadNotify);
+	PsRemoveCreateThreadNotifyRoutine(OnThreadNotify);
 	PsSetCreateProcessNotifyRoutineEx(OnProcessNotify, TRUE);
+
 	UNICODE_STRING symLink = RTL_CONSTANT_STRING(L"\\??\\SysMon");
 	IoDeleteSymbolicLink(&symLink);
 	IoDeleteDevice(DriverObject->DeviceObject);
-	// Освобождение оставшихся элементов
+
 	while (!IsListEmpty(&g_Globals.ItemsHead)) {
 		auto entry = RemoveHeadList(&g_Globals.ItemsHead);
 		ExFreePool(CONTAINING_RECORD(entry, FullItem<ItemHeader>, Entry));
 	}
+}
+
+NTSTATUS OnRegistryNotify(PVOID context, PVOID arg1, PVOID arg2) {
+	UNREFERENCED_PARAMETER(context);
+
+	static const WCHAR machine[] = L"\\REGISTRY\\MACHINE\\";
+
+	switch ((REG_NOTIFY_CLASS)(ULONG_PTR)arg1) {
+	case RegNtPostSetValueKey:
+		auto args = (REG_POST_OPERATION_INFORMATION*)arg2;
+		if (!NT_SUCCESS(args->Status))
+			break;
+
+		PCUNICODE_STRING name;
+		if (NT_SUCCESS(CmCallbackGetKeyObjectIDEx(&g_Globals.RegCookie, args->Object, nullptr, &name, 0))) {
+			if (::wcsncmp(name->Buffer, machine, ARRAYSIZE(machine) - 1) == 0) {
+				auto preInfo = (REG_SET_VALUE_KEY_INFORMATION*)args->PreInformation;
+				NT_ASSERT(preInfo);
+
+				auto size = sizeof(FullItem<RegistrySetValueInfo>);
+				auto info = (FullItem<RegistrySetValueInfo>*)ExAllocatePoolWithTag(PagedPool, size, DRIVER_TAG);
+				if (info == nullptr)
+					break;
+
+				RtlZeroMemory(info, size);
+				auto& item = info->Data;
+				KeQuerySystemTimePrecise(&item.Time);
+				item.Size = sizeof(item);
+				item.Type = ItemType::RegistrySetValue;
+
+				item.ProcessId = HandleToULong(PsGetCurrentProcessId());
+				item.ThreadId = HandleToULong(PsGetCurrentThreadId());
+
+				::wcsncpy_s(item.KeyName, name->Buffer, name->Length / sizeof(WCHAR) - 1);
+				::wcsncpy_s(item.ValueName, preInfo->ValueName->Buffer, preInfo->ValueName->Length / sizeof(WCHAR) - 1);
+
+				item.DataType = preInfo->Type;
+				item.DataSize = preInfo->DataSize;
+				item.ProcessId = HandleToULong(PsGetCurrentProcessId());
+				item.ThreadId = HandleToULong(PsGetCurrentThreadId());
+				::memcpy(item.Data, preInfo->Data, min(item.DataSize, sizeof(item.Data)));
+
+				PushItem(&info->Entry);
+			}
+			CmCallbackReleaseKeyObjectIDEx(name);
+		}
+		break;
+
+	}
+	return STATUS_SUCCESS;
 }
